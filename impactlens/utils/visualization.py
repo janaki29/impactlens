@@ -501,7 +501,7 @@ def generate_charts_from_combined_report(
     create_sheets_visualization: bool = False,
     spreadsheet_id: Optional[str] = None,
     upload_charts_to_github: bool = True,
-    github_repo: str = "testcara/impactlens-charts",
+    github_repo: str = "janaki29/impactlens-charts",
     team_name: Optional[str] = None,
     config_path: Optional[str] = None,
     replace_existing: bool = False,
