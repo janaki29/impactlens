@@ -64,7 +64,7 @@ class ConfigValidator:
             # output_dir is optional - defaults to "reports"
         },
         'pr_report_config.yaml': {
-            'project': ['github_repo_owner', 'github_repo_name'],
+            'project': ['git_repo_owner', 'git_repo_name'],
             'phases': True,
             'members': True,
             # output_dir is optional - defaults to "reports"
@@ -93,11 +93,15 @@ class ConfigValidator:
         'spreadsheet_id',
         'jira_url',
         'github_url',
+        'git_url',
         'github_repo_owner',
         'github_repo_name',
+        'git_repo_owner',
+        'git_repo_name',
         'jira_project_key',
         'name',
         'github_username',
+        'git_username',
         'email',
         'description',
         'leave_days',
