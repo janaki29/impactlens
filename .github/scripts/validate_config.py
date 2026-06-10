@@ -109,6 +109,13 @@ class ConfigValidator:
         'start',
         'end',
         'projects',
+        'monthly_comparison',
+        'comparison_reference_date',
+        'no_ai_analysis',
+        'replace_existing_reports',
+        'visualization',
+        'email_anonymous_id',
+        'log_level',
     ]
 
     def __init__(self, strict: bool = True):
