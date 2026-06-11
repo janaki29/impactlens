@@ -444,6 +444,17 @@ Examples:
     if result != 0:
         return result
 
+    # Monthly AI Trend: bar+line chart across all months (team-level only)
+    if root_configs.get("monthly_trend") and not author and not args.all_members:
+        _run_monthly_trend(
+            config_file=config_file,
+            custom_config_file=custom_config_file,
+            reports_dir=reports_dir,
+            no_upload=args.no_upload,
+            project_settings=project_settings,
+            root_configs=root_configs,
+        )
+
     # Monthly comparison: generate a separate prev-month vs current-month report
     if root_configs.get("monthly_comparison") and not author and not args.all_members:
         _run_pr_monthly_comparison(
@@ -458,6 +469,54 @@ Examples:
 
     print(f"{Colors.GREEN}Done!{Colors.NC}")
     return 0
+
+
+def _run_monthly_trend(
+    config_file: Path,
+    custom_config_file: Optional[Path],
+    reports_dir: Path,
+    no_upload: bool,
+    project_settings: dict,
+    root_configs: dict,
+) -> None:
+    """Generate and upload the Monthly AI Trend chart."""
+    import os as _os
+
+    print()
+    print(f"{Colors.BLUE}{'=' * 40}{Colors.NC}")
+    print(f"{Colors.BLUE}Monthly AI Trend Chart{Colors.NC}")
+    print(f"{Colors.BLUE}{'=' * 40}{Colors.NC}")
+
+    try:
+        from impactlens.utils.visualization import generate_monthly_trend_report
+
+        repo_name = project_settings.get("git_repo_name", "")
+        title_prefix = f"{repo_name} - " if repo_name else ""
+
+        spreadsheet_id = _os.environ.get("GOOGLE_SPREADSHEET_ID", "")
+        github_repo = _os.environ.get("CHARTS_GITHUB_REPO", "janaki29/impactlens-charts")
+        replace_existing = root_configs.get("replace_existing_reports", False)
+
+        result = generate_monthly_trend_report(
+            reports_dir=str(reports_dir),
+            github_repo=github_repo,
+            spreadsheet_id=spreadsheet_id if not no_upload else None,
+            config_path=str(custom_config_file) if custom_config_file else str(config_file),
+            replace_existing=replace_existing,
+            title_prefix=title_prefix,
+        )
+
+        if result and result.get("sheet_info"):
+            url = result["sheet_info"].get("url", "")
+            print(f"{Colors.GREEN}  ✓ Monthly AI Trend tab created: {url}{Colors.NC}")
+        elif result:
+            print(f"{Colors.GREEN}  ✓ Monthly AI Trend chart generated{Colors.NC}")
+        else:
+            print(f"{Colors.YELLOW}  ⚠ Monthly AI Trend chart could not be generated{Colors.NC}")
+    except Exception as e:
+        print(f"{Colors.YELLOW}  ⚠ Monthly AI Trend failed: {e}{Colors.NC}")
+
+    print()
 
 
 def _run_pr_monthly_comparison(

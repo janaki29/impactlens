@@ -110,6 +110,7 @@ class ConfigValidator:
         'end',
         'projects',
         'monthly_comparison',
+        'monthly_trend',
         'comparison_reference_date',
         'no_ai_analysis',
         'replace_existing_reports',

@@ -711,3 +711,293 @@ def generate_charts_from_combined_report(
         }
 
     return generated_charts, result_info
+
+
+# ---------------------------------------------------------------------------
+# Monthly AI Trend chart
+# ---------------------------------------------------------------------------
+
+def collect_monthly_commit_stats(json_files: List[str]) -> List[Dict]:
+    """
+    Read a collection of pr_metrics_*.json files and aggregate commit stats by month.
+
+    For each merged PR the JSON records:
+      - merged_at  (ISO-8601 timestamp)
+      - ai_commits_count
+      - total_commits
+
+    Args:
+        json_files: Paths to pr_metrics JSON files (all phases / periods).
+
+    Returns:
+        List of dicts sorted by month, each with keys:
+          month       – "YYYY-MM"
+          ai          – total AI commits that month
+          human       – total Human commits that month
+          total       – ai + human
+          ai_pct      – AI percentage (0–100)
+    """
+    import json as _json
+    from collections import defaultdict
+
+    monthly: Dict[str, Dict[str, int]] = defaultdict(lambda: {"ai": 0, "human": 0})
+
+    for path in json_files:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = _json.load(fh)
+        except Exception:
+            continue
+
+        for pr in data.get("prs", []):
+            merged_at = pr.get("merged_at") or pr.get("merge_date") or ""
+            if not merged_at:
+                continue
+            try:
+                month_key = merged_at[:7]  # "YYYY-MM"
+            except Exception:
+                continue
+
+            ai_c = int(pr.get("ai_commits_count", 0) or 0)
+            total_c = int(pr.get("total_commits", 0) or 0)
+            human_c = max(0, total_c - ai_c)
+
+            monthly[month_key]["ai"] += ai_c
+            monthly[month_key]["human"] += human_c
+
+    result = []
+    for month in sorted(monthly.keys()):
+        ai = monthly[month]["ai"]
+        human = monthly[month]["human"]
+        total = ai + human
+        ai_pct = round(ai / total * 100, 1) if total > 0 else 0.0
+        result.append({"month": month, "ai": ai, "human": human, "total": total, "ai_pct": ai_pct})
+
+    return result
+
+
+def generate_monthly_trend_chart(
+    monthly_stats: List[Dict],
+    output_path: str,
+    title_prefix: str = "",
+) -> bool:
+    """
+    Generate the Monthly AI Trend bar+line chart (matches the screenshot style).
+
+    Purple bars  = AI commits
+    Gray bars    = Human commits
+    Blue line    = AI share %  (right Y-axis)
+
+    Args:
+        monthly_stats: Output of collect_monthly_commit_stats().
+        output_path:   Where to save the PNG (directory is created if needed).
+        title_prefix:  Optional project name prefix for the chart title.
+
+    Returns:
+        True on success, False if matplotlib is unavailable or data is empty.
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        print("Warning: matplotlib not available – skipping Monthly AI Trend chart.")
+        return False
+
+    if not monthly_stats:
+        print("No monthly stats data – skipping Monthly AI Trend chart.")
+        return False
+
+    months = [d["month"] for d in monthly_stats]
+    # Shorten last label with '*' if current month is not yet complete
+    from datetime import date as _date
+    today = _date.today()
+    cur_month_key = today.strftime("%Y-%m")
+    display_months = []
+    for m in months:
+        if m == cur_month_key:
+            display_months.append(m + "*")
+        else:
+            display_months.append(m)
+
+    ai_vals = [d["ai"] for d in monthly_stats]
+    human_vals = [d["human"] for d in monthly_stats]
+    ai_pcts = [d["ai_pct"] for d in monthly_stats]
+
+    n = len(months)
+    x = list(range(n))
+    bar_w = 0.38
+
+    fig, ax1 = plt.subplots(figsize=(max(10, n * 0.9), 5.5))
+
+    # --- Bars ---
+    bars_ai = ax1.bar(
+        [i - bar_w / 2 for i in x], ai_vals, width=bar_w,
+        color="#7c3aed", label="AI", zorder=3,
+    )
+    bars_human = ax1.bar(
+        [i + bar_w / 2 for i in x], human_vals, width=bar_w,
+        color="#6b7280", label="Human", zorder=3,
+    )
+
+    ax1.set_ylabel("Commits", fontsize=11)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(display_months, rotation=30, ha="right", fontsize=9)
+    ax1.yaxis.grid(True, linestyle="--", alpha=0.4, zorder=0)
+    ax1.set_axisbelow(True)
+    ax1.tick_params(axis="y", labelsize=9)
+
+    # Start Y-axis from 0, leave headroom
+    max_commits = max((a + h) for a, h in zip(ai_vals, human_vals)) if monthly_stats else 1
+    ax1.set_ylim(0, max_commits * 1.25)
+
+    # --- AI % line (right Y-axis) ---
+    ax2 = ax1.twinx()
+    line_ai, = ax2.plot(
+        x, ai_pcts, color="#93c5fd", linewidth=2,
+        marker="o", markersize=5, label="AI %", zorder=4,
+    )
+    ax2.set_ylabel("AI %", fontsize=11)
+    ax2.set_ylim(0, 100)
+    ax2.tick_params(axis="y", labelsize=9)
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{int(v)}%"))
+
+    # --- Title & subtitle ---
+    full_title = f"{title_prefix}Monthly AI Trend" if title_prefix else "Monthly AI Trend"
+    ax1.set_title(full_title, fontsize=14, fontweight="bold", pad=14)
+    fig.text(
+        0.5, 0.93,
+        "AI vs human commit volume per month. Line shows AI share percentage.",
+        ha="center", fontsize=9, color="#6b7280",
+    )
+
+    # --- Legend ---
+    handles = [bars_ai, bars_human, line_ai]
+    labels = ["AI", "Human", "AI %"]
+    ax1.legend(handles, labels, loc="upper left", fontsize=9, framealpha=0.8)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    plt.savefig(output_path, dpi=95, bbox_inches="tight")
+    plt.close()
+
+    print(f"Monthly trend chart saved: {output_path}")
+    return True
+
+
+def generate_monthly_trend_report(
+    reports_dir: str,
+    output_dir: Optional[str] = None,
+    github_repo: str = "janaki29/impactlens-charts",
+    team_name: Optional[str] = None,
+    spreadsheet_id: Optional[str] = None,
+    config_path: Optional[str] = None,
+    replace_existing: bool = False,
+    title_prefix: str = "",
+) -> Optional[Dict]:
+    """
+    End-to-end: collect JSON data → generate chart → upload to GitHub → embed in Google Sheets.
+
+    Args:
+        reports_dir:        Directory that contains pr_metrics_*.json files (all phases).
+        output_dir:         Where to write the PNG (defaults to reports_dir/charts/).
+        github_repo:        "owner/repo" for chart image storage.
+        team_name:          Used as subfolder in the charts repo.
+        spreadsheet_id:     Google Sheets spreadsheet ID.
+        config_path:        Path to config YAML (for sheet prefix extraction).
+        replace_existing:   Delete old "Monthly AI Trend" tabs before creating a new one.
+        title_prefix:       Project name prefix for the chart title.
+
+    Returns:
+        Dict with sheet_info / chart links, or None on failure.
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        print("Warning: matplotlib not available – skipping Monthly AI Trend report.")
+        return None
+
+    reports_path = Path(reports_dir)
+
+    # Collect all pr_metrics JSON files (from all sub-directories)
+    json_files = list(reports_path.rglob("pr_metrics_*.json"))
+    if not json_files:
+        print(f"No pr_metrics_*.json found under {reports_dir} – skipping Monthly AI Trend.")
+        return None
+
+    print(f"\n📈 Generating Monthly AI Trend from {len(json_files)} JSON file(s)...")
+
+    monthly_stats = collect_monthly_commit_stats([str(f) for f in json_files])
+    if not monthly_stats:
+        print("No monthly commit data found – skipping Monthly AI Trend chart.")
+        return None
+
+    # Output PNG path
+    charts_dir = output_dir or str(reports_path / "charts")
+    png_path = os.path.join(charts_dir, "monthly_ai_trend.png")
+
+    success = generate_monthly_trend_chart(
+        monthly_stats=monthly_stats,
+        output_path=png_path,
+        title_prefix=title_prefix,
+    )
+    if not success:
+        return None
+
+    # Upload to GitHub
+    chart_links = []
+    try:
+        from impactlens.utils.github_charts_uploader import (
+            upload_charts_to_github as github_upload,
+        )
+
+        # Auto-detect team name
+        if team_name is None:
+            path_parts = reports_path.parts
+            team_name = "unknown"
+            if "reports" in path_parts:
+                idx = path_parts.index("reports")
+                if idx + 1 < len(path_parts):
+                    team_name = path_parts[idx + 1]
+
+        github_urls = github_upload(
+            chart_files=[png_path],
+            repo=github_repo,
+            team_name=team_name,
+            report_type="pr",
+        )
+
+        filename = os.path.basename(png_path)
+        if filename in github_urls:
+            chart_links.append({
+                "path": png_path,
+                "name": "Monthly AI Trend",
+                "embedUrl": github_urls[filename],
+                "webViewLink": github_urls[filename],
+            })
+    except Exception as e:
+        print(f"⚠️  Could not upload Monthly AI Trend chart to GitHub: {e}")
+
+    if not chart_links:
+        return None
+
+    # Create Google Sheets visualization tab
+    sheet_info = None
+    try:
+        from impactlens.clients.sheets_client import get_sheets_service
+        from impactlens.utils.sheets_visualization import create_visualization_sheet
+
+        service = get_sheets_service()
+
+        # We need a dummy report_path for create_visualization_sheet metadata.
+        # Use the PNG path itself – the function only uses it for report type detection.
+        sheet_info = create_visualization_sheet(
+            service=service,
+            report_path=png_path,
+            chart_github_links=chart_links,
+            spreadsheet_id=spreadsheet_id,
+            sheet_name="Monthly AI Trend",
+            config_path=config_path,
+            replace_existing=replace_existing,
+        )
+        if sheet_info:
+            print(f"✓ Monthly AI Trend tab created: {sheet_info.get('url', '')}")
+    except Exception as e:
+        print(f"⚠️  Could not create Monthly AI Trend Sheets tab: {e}")
+
+    return {"chart_links": chart_links, "sheet_info": sheet_info}

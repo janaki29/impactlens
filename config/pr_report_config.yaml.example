@@ -71,6 +71,12 @@ output_dir: "reports/jira"
 # When disabled: Skips prompt and analysis generation (faster processing, no API costs)
 # no_ai_analysis: true
 
+# Monthly AI Trend chart (optional)
+# When enabled, reads all pr_metrics JSON files and generates a bar+line chart
+# showing AI vs Human commit volume per month with an AI% trend line.
+# Uploaded as a "Monthly AI Trend" tab in Google Sheets.
+# monthly_trend: true
+
 # Monthly Comparison (optional)
 # When enabled, generates an additional report comparing two consecutive months,
 # uploaded as a separate "Monthly Comparison" tab in Google Sheets.
