@@ -717,6 +717,124 @@ def generate_charts_from_combined_report(
 # Monthly AI Trend chart
 # ---------------------------------------------------------------------------
 
+def generate_monthly_comparison_chart(
+    monthly_phases: List[Tuple[str, str, str]],
+    reports_dir: str,
+    output_path: str,
+    title_prefix: str = "",
+) -> bool:
+    """
+    Generate a grouped bar chart comparing key PR metrics across N months.
+
+    Reads pr_metrics_*.json files from the monthly/ subdirectory (one per phase)
+    and produces a side-by-side bar chart showing:
+      - AI-Assisted PRs (purple)
+      - Non-AI PRs (gray)
+      - AI Adoption Rate % line (blue, right Y-axis)
+
+    Args:
+        monthly_phases: List of (name, start, end) tuples from get_monthly_phases_n().
+        reports_dir:    Parent reports directory (e.g. reports/github).
+        output_path:    Where to save the PNG.
+        title_prefix:   Optional project name prefix.
+
+    Returns:
+        True on success, False otherwise.
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        return False
+
+    import json as _json
+    from pathlib import Path as _Path
+
+    monthly_dir = _Path(reports_dir) / "monthly"
+
+    # Collect stats per phase from JSON files
+    phase_stats = []
+    for phase_name, start, end in monthly_phases:
+        pattern = f"pr_metrics_general_{start.replace('-', '')}_{end.replace('-', '')}.json"
+        json_file = monthly_dir / pattern
+        if not json_file.exists():
+            # Try any matching file for this period
+            candidates = list(monthly_dir.glob(f"pr_metrics_general_{start.replace('-', '')}_*.json"))
+            json_file = candidates[0] if candidates else None
+
+        if json_file and json_file.exists():
+            try:
+                with open(json_file, "r") as fh:
+                    data = _json.load(fh)
+                stats = data.get("statistics", {})
+                phase_stats.append({
+                    "name": phase_name,
+                    "ai": stats.get("ai_assisted_prs", 0) or 0,
+                    "non_ai": stats.get("non_ai_prs", 0) or 0,
+                    "ai_rate": stats.get("ai_adoption_rate", 0) or 0,
+                    "total": stats.get("total_prs", 0) or 0,
+                })
+            except Exception:
+                phase_stats.append({"name": phase_name, "ai": 0, "non_ai": 0, "ai_rate": 0, "total": 0})
+        else:
+            phase_stats.append({"name": phase_name, "ai": 0, "non_ai": 0, "ai_rate": 0, "total": 0})
+
+    if not phase_stats:
+        return False
+
+    months = [d["name"] for d in phase_stats]
+    ai_vals = [d["ai"] for d in phase_stats]
+    non_ai_vals = [d["non_ai"] for d in phase_stats]
+    ai_pcts = [d["ai_rate"] for d in phase_stats]
+    n = len(months)
+    x = list(range(n))
+    bar_w = 0.35
+
+    fig, ax1 = plt.subplots(figsize=(max(7, n * 2.2), 5.5))
+
+    bars_ai = ax1.bar(
+        [i - bar_w / 2 for i in x], ai_vals, width=bar_w,
+        color="#7c3aed", label="AI-Assisted PRs", zorder=3,
+    )
+    bars_non = ax1.bar(
+        [i + bar_w / 2 for i in x], non_ai_vals, width=bar_w,
+        color="#6b7280", label="Non-AI PRs", zorder=3,
+    )
+
+    ax1.set_ylabel("PR Count", fontsize=11)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(months, fontsize=11)
+    ax1.yaxis.grid(True, linestyle="--", alpha=0.4, zorder=0)
+    ax1.set_axisbelow(True)
+    max_bar = max(max(ai_vals, default=0), max(non_ai_vals, default=0))
+    ax1.set_ylim(0, max(max_bar * 1.3, 1))
+
+    ax2 = ax1.twinx()
+    line_ai, = ax2.plot(
+        x, ai_pcts, color="#93c5fd", linewidth=2,
+        marker="o", markersize=6, label="AI %", zorder=4,
+    )
+    ax2.set_ylabel("AI Adoption %", fontsize=11)
+    ax2.set_ylim(0, 100)
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{int(v)}%"))
+
+    full_title = f"{title_prefix}Monthly PR Comparison" if title_prefix else "Monthly PR Comparison"
+    ax1.set_title(full_title, fontsize=14, fontweight="bold", pad=14)
+    fig.text(
+        0.5, 0.93,
+        "AI-assisted vs Non-AI PRs per month. Line shows AI adoption rate.",
+        ha="center", fontsize=9, color="#6b7280",
+    )
+
+    handles = [bars_ai, bars_non, line_ai]
+    labels = ["AI-Assisted PRs", "Non-AI PRs", "AI %"]
+    ax1.legend(handles, labels, loc="upper left", fontsize=9, framealpha=0.8)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    plt.savefig(output_path, dpi=95, bbox_inches="tight")
+    plt.close()
+    print(f"Monthly comparison chart saved: {output_path}")
+    return True
+
+
 def collect_monthly_commit_stats(json_files: List[str]) -> List[Dict]:
     """
     Read a collection of pr_metrics_*.json files and aggregate commit stats by month.

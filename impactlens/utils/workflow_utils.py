@@ -354,6 +354,7 @@ def load_config_file(
     root_configs["monthly_comparison"] = config.get("monthly_comparison", False)
     root_configs["comparison_reference_date"] = config.get("comparison_reference_date", None)
     root_configs["monthly_trend"] = config.get("monthly_trend", False)
+    root_configs["trend_months"] = int(config.get("trend_months", 2))
 
     # Apply log_level from config if specified
     if root_configs["log_level"]:

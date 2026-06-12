@@ -455,7 +455,7 @@ Examples:
             root_configs=root_configs,
         )
 
-    # Monthly comparison: generate a separate prev-month vs current-month report
+    # Monthly comparison: generate a separate N-month comparison report + visual chart
     if root_configs.get("monthly_comparison") and not author and not args.all_members:
         _run_pr_monthly_comparison(
             config_file=config_file,
@@ -465,6 +465,8 @@ Examples:
             no_upload=args.no_upload,
             incremental=args.incremental,
             comparison_reference_date=root_configs.get("comparison_reference_date"),
+            trend_months=root_configs.get("trend_months", 2),
+            project_settings=project_settings,
         )
 
     print(f"{Colors.GREEN}Done!{Colors.NC}")
@@ -527,22 +529,28 @@ def _run_pr_monthly_comparison(
     no_upload: bool,
     incremental: bool = False,
     comparison_reference_date: Optional[str] = None,
+    trend_months: int = 2,
+    project_settings: Optional[dict] = None,
 ) -> None:
-    """Generate a Previous Month vs Current Month PR comparison report."""
+    """Generate an N-month PR comparison report (data TSV + visual bar chart tab)."""
     from datetime import date as _date
+    from impactlens.utils.date_utils import get_monthly_phases_n
+
     ref_date = None
     if comparison_reference_date:
         try:
             ref_date = _date.fromisoformat(comparison_reference_date)
         except ValueError:
             print(f"{Colors.YELLOW}  ⚠ Invalid comparison_reference_date '{comparison_reference_date}', using today{Colors.NC}")
-    monthly_phases = get_monthly_phases(ref_date)
+
+    monthly_phases = get_monthly_phases_n(trend_months, ref_date)
     monthly_dir = reports_dir / "monthly"
     monthly_dir.mkdir(parents=True, exist_ok=True)
 
     print()
     print(f"{Colors.BLUE}{'=' * 40}{Colors.NC}")
-    print(f"{Colors.BLUE}Monthly Comparison (PR){Colors.NC}")
+    month_names = ", ".join(p[0] for p in monthly_phases)
+    print(f"{Colors.BLUE}Monthly Comparison (PR): {month_names}{Colors.NC}")
     print(f"{Colors.BLUE}{'=' * 40}{Colors.NC}")
 
     for phase_name, start_date, end_date in monthly_phases:
@@ -562,7 +570,7 @@ def _run_pr_monthly_comparison(
             print(f"{Colors.YELLOW}  ⚠ '{phase_name}' failed, skipping monthly comparison{Colors.NC}")
             return
 
-    # Generate the comparison TSV from the monthly JSON files
+    # Generate the comparison TSV
     success = generate_comparison_report(
         output_dir=str(monthly_dir),
         config_file=config_file,
@@ -572,7 +580,7 @@ def _run_pr_monthly_comparison(
         print(f"{Colors.YELLOW}  ⚠ Monthly comparison report generation failed{Colors.NC}")
         return
 
-    # Upload the monthly comparison TSV to Google Sheets
+    # Upload comparison TSV to Google Sheets
     monthly_tsvs = sorted(monthly_dir.glob("pr_comparison_general_*.tsv"), reverse=True)
     if monthly_tsvs:
         latest = monthly_tsvs[0]
@@ -581,7 +589,97 @@ def _run_pr_monthly_comparison(
     else:
         print(f"{Colors.YELLOW}  ⚠ No monthly comparison TSV found{Colors.NC}")
 
+    # Generate visual bar chart and upload as "Monthly Comparison (Visual)" tab
+    _run_monthly_comparison_chart(
+        monthly_phases=monthly_phases,
+        reports_dir=reports_dir,
+        monthly_dir=monthly_dir,
+        custom_config_file=custom_config_file,
+        project_settings=project_settings or {},
+        no_upload=no_upload,
+    )
+
     print()
+
+
+def _run_monthly_comparison_chart(
+    monthly_phases,
+    reports_dir: Path,
+    monthly_dir: Path,
+    custom_config_file: Optional[Path],
+    project_settings: dict,
+    no_upload: bool,
+) -> None:
+    """Generate and upload the monthly comparison bar chart to Google Sheets."""
+    import os as _os
+    from impactlens.utils.visualization import generate_monthly_comparison_chart
+
+    repo_name = project_settings.get("git_repo_name", "")
+    title_prefix = f"{repo_name} - " if repo_name else ""
+    png_path = str(monthly_dir / "charts" / "monthly_pr_comparison.png")
+
+    success = generate_monthly_comparison_chart(
+        monthly_phases=monthly_phases,
+        reports_dir=str(reports_dir),
+        output_path=png_path,
+        title_prefix=title_prefix,
+    )
+    if not success:
+        print(f"{Colors.YELLOW}  ⚠ Monthly comparison chart could not be generated{Colors.NC}")
+        return
+
+    if no_upload:
+        print(f"{Colors.GREEN}  ✓ Monthly comparison chart saved (upload skipped){Colors.NC}")
+        return
+
+    try:
+        from impactlens.utils.github_charts_uploader import upload_charts_to_github
+        from impactlens.clients.sheets_client import get_sheets_service
+        from impactlens.utils.sheets_visualization import create_visualization_sheet
+
+        github_repo = _os.environ.get("CHARTS_GITHUB_REPO", "janaki29/impactlens-charts")
+
+        path_parts = reports_dir.parts
+        team_name = "unknown"
+        if "reports" in path_parts:
+            idx = path_parts.index("reports")
+            if idx + 1 < len(path_parts):
+                team_name = path_parts[idx + 1]
+
+        github_urls = upload_charts_to_github(
+            chart_files=[png_path],
+            repo=github_repo,
+            team_name=team_name,
+            report_type="pr",
+        )
+
+        import os as _os2
+        filename = _os2.path.basename(png_path)
+        if filename not in github_urls:
+            print(f"{Colors.YELLOW}  ⚠ Chart upload to GitHub failed{Colors.NC}")
+            return
+
+        chart_links = [{
+            "path": png_path,
+            "name": "Monthly Comparison (Visual)",
+            "embedUrl": github_urls[filename],
+            "webViewLink": github_urls[filename],
+        }]
+
+        service = get_sheets_service()
+        sheet_info = create_visualization_sheet(
+            service=service,
+            report_path=png_path,
+            chart_github_links=chart_links,
+            spreadsheet_id=_os.environ.get("GOOGLE_SPREADSHEET_ID", ""),
+            sheet_name="Monthly Comparison (Visual)",
+            config_path=str(custom_config_file) if custom_config_file else None,
+            replace_existing=True,
+        )
+        if sheet_info:
+            print(f"{Colors.GREEN}  ✓ 'Monthly Comparison (Visual)' tab created{Colors.NC}")
+    except Exception as e:
+        print(f"{Colors.YELLOW}  ⚠ Monthly comparison chart upload failed: {e}{Colors.NC}")
 
 
 if __name__ == "__main__":

@@ -70,3 +70,45 @@ def get_monthly_phases(reference_date: date = None) -> List[Tuple[str, str, str]
         (prev_name, prev_start.strftime("%Y-%m-%d"), prev_end.strftime("%Y-%m-%d")),
         (cur_name, cur_start.strftime("%Y-%m-%d"), cur_end.strftime("%Y-%m-%d")),
     ]
+
+
+def get_monthly_phases_n(n: int, reference_date: date = None) -> List[Tuple[str, str, str]]:
+    """
+    Compute N monthly phases ending at (and including) reference_date's month.
+
+    The last phase is the current (partial) month up to reference_date.
+    All earlier phases are full calendar months going backwards.
+
+    Examples with n=3 and today = 2026-06-12:
+        Apr 2026: 2026-04-01 → 2026-04-30  (full)
+        May 2026: 2026-05-01 → 2026-05-31  (full)
+        Jun 2026: 2026-06-01 → 2026-06-12  (partial, up to today)
+
+    Args:
+        n:              Number of months to include (must be >= 1).
+        reference_date: Reference date (defaults to today).
+
+    Returns:
+        List of (phase_name, start_date_str, end_date_str) tuples,
+        oldest month first.
+    """
+    if reference_date is None:
+        reference_date = date.today()
+
+    n = max(1, n)
+    phases = []
+
+    cur_year = reference_date.year
+    cur_month = reference_date.month
+
+    # Build phases from newest → oldest, then reverse
+    year, month = cur_year, cur_month
+    for i in range(n):
+        start = get_first_day_of_month(year, month)
+        end = reference_date if i == 0 else get_last_day_of_month(year, month)
+        name = start.strftime("%b %Y")
+        phases.append((name, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")))
+        year, month = get_previous_month(year, month)
+
+    phases.reverse()
+    return phases
