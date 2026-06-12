@@ -570,13 +570,42 @@ def _run_pr_monthly_comparison(
             print(f"{Colors.YELLOW}  ⚠ '{phase_name}' failed, skipping monthly comparison{Colors.NC}")
             return
 
-    # Generate the comparison TSV
-    success = generate_comparison_report(
-        output_dir=str(monthly_dir),
-        config_file=config_file,
-        hide_individual_names=hide_individual_names,
-    )
-    if not success:
+    # Generate the comparison TSV using month names directly (bypasses config phase names)
+    try:
+        from impactlens.utils.report_utils import (
+            find_comparison_reports as _find_cmp_reports,
+            generate_comparison_report as _util_gen_cmp_report,
+            reconcile_phase_names as _reconcile_names,
+            build_pr_project_prefix as _build_prefix,
+        )
+        from impactlens.core.pr_report_generator import PRReportGenerator as _PRReportGen
+
+        report_files = _find_cmp_reports(
+            report_type="pr",
+            identifier=None,
+            reports_dir=str(monthly_dir),
+        )
+
+        month_names = [p[0] for p in monthly_phases]
+        month_names, report_files = _reconcile_names(month_names, report_files)
+
+        output_path = _util_gen_cmp_report(
+            report_files=report_files,
+            report_generator=_PRReportGen(),
+            phase_names=month_names,
+            identifier=None,
+            output_dir=str(monthly_dir),
+            output_file=None,
+            report_type="pr",
+            project_prefix=_build_prefix(project_settings or {}),
+            hide_individual_names=hide_individual_names,
+        )
+        comparison_generated = bool(output_path)
+    except Exception as e:
+        print(f"{Colors.YELLOW}  ⚠ Monthly comparison report generation failed: {e}{Colors.NC}")
+        comparison_generated = False
+
+    if not comparison_generated:
         print(f"{Colors.YELLOW}  ⚠ Monthly comparison report generation failed{Colors.NC}")
         return
 
