@@ -618,8 +618,18 @@ def _run_pr_monthly_comparison(
     else:
         print(f"{Colors.YELLOW}  ⚠ No monthly comparison TSV found{Colors.NC}")
 
-    # Generate visual bar chart and upload as "Monthly Comparison (Visual)" tab
+    # Generate AI vs Non-AI comparison bar chart → "Monthly Comparison (Visual)" tab
     _run_monthly_comparison_chart(
+        monthly_phases=monthly_phases,
+        reports_dir=reports_dir,
+        monthly_dir=monthly_dir,
+        custom_config_file=custom_config_file,
+        project_settings=project_settings or {},
+        no_upload=no_upload,
+    )
+
+    # Generate key-metrics 2×2 chart → "Monthly Metrics (Visual)" tab
+    _run_monthly_metrics_chart(
         monthly_phases=monthly_phases,
         reports_dir=reports_dir,
         monthly_dir=monthly_dir,
@@ -709,6 +719,86 @@ def _run_monthly_comparison_chart(
             print(f"{Colors.GREEN}  ✓ 'Monthly Comparison (Visual)' tab created{Colors.NC}")
     except Exception as e:
         print(f"{Colors.YELLOW}  ⚠ Monthly comparison chart upload failed: {e}{Colors.NC}")
+
+
+def _run_monthly_metrics_chart(
+    monthly_phases,
+    reports_dir: Path,
+    monthly_dir: Path,
+    custom_config_file: Optional[Path],
+    project_settings: dict,
+    no_upload: bool,
+) -> None:
+    """Generate and upload the 2×2 monthly key-metrics bar chart to Google Sheets."""
+    import os as _os
+    from impactlens.utils.visualization import generate_monthly_metrics_chart
+
+    repo_name = project_settings.get("git_repo_name", "")
+    title_prefix = f"{repo_name} - " if repo_name else ""
+    png_path = str(monthly_dir / "charts" / "monthly_pr_metrics.png")
+
+    success = generate_monthly_metrics_chart(
+        monthly_phases=monthly_phases,
+        reports_dir=str(reports_dir),
+        output_path=png_path,
+        title_prefix=title_prefix,
+    )
+    if not success:
+        print(f"{Colors.YELLOW}  ⚠ Monthly metrics chart could not be generated{Colors.NC}")
+        return
+
+    if no_upload:
+        print(f"{Colors.GREEN}  ✓ Monthly metrics chart saved (upload skipped){Colors.NC}")
+        return
+
+    try:
+        from impactlens.utils.github_charts_uploader import upload_charts_to_github
+        from impactlens.clients.sheets_client import get_sheets_service
+        from impactlens.utils.sheets_visualization import create_visualization_sheet
+
+        github_repo = _os.environ.get("CHARTS_GITHUB_REPO", "janaki29/impactlens-charts")
+
+        path_parts = reports_dir.parts
+        team_name = "unknown"
+        if "reports" in path_parts:
+            idx = path_parts.index("reports")
+            if idx + 1 < len(path_parts):
+                team_name = path_parts[idx + 1]
+
+        github_urls = upload_charts_to_github(
+            chart_files=[png_path],
+            repo=github_repo,
+            team_name=team_name,
+            report_type="pr",
+        )
+
+        import os as _os2
+        filename = _os2.path.basename(png_path)
+        if filename not in github_urls:
+            print(f"{Colors.YELLOW}  ⚠ Metrics chart upload to GitHub failed{Colors.NC}")
+            return
+
+        chart_links = [{
+            "path": png_path,
+            "name": "Monthly Metrics (Visual)",
+            "embedUrl": github_urls[filename],
+            "webViewLink": github_urls[filename],
+        }]
+
+        service = get_sheets_service()
+        sheet_info = create_visualization_sheet(
+            service=service,
+            report_path=png_path,
+            chart_github_links=chart_links,
+            spreadsheet_id=_os.environ.get("GOOGLE_SPREADSHEET_ID", ""),
+            sheet_name="Monthly Metrics (Visual)",
+            config_path=str(custom_config_file) if custom_config_file else None,
+            replace_existing=True,
+        )
+        if sheet_info:
+            print(f"{Colors.GREEN}  ✓ 'Monthly Metrics (Visual)' tab created{Colors.NC}")
+    except Exception as e:
+        print(f"{Colors.YELLOW}  ⚠ Monthly metrics chart upload failed: {e}{Colors.NC}")
 
 
 if __name__ == "__main__":

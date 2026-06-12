@@ -835,6 +835,141 @@ def generate_monthly_comparison_chart(
     return True
 
 
+def generate_monthly_metrics_chart(
+    monthly_phases: List[Tuple[str, str, str]],
+    reports_dir: str,
+    output_path: str,
+    title_prefix: str = "",
+) -> bool:
+    """
+    Generate a 2×2 subplot chart comparing key PR metrics across N months.
+
+    Panels:
+      Top-left:     AI-Assisted vs Non-AI PRs (grouped bars)
+      Top-right:    Daily Throughput (PRs/day)
+      Bottom-left:  Avg Time to First Review (hours)
+      Bottom-right: Avg Comments per PR
+
+    Args:
+        monthly_phases: List of (name, start, end) from get_monthly_phases_n().
+        reports_dir:    Parent reports directory (e.g. reports/github).
+        output_path:    Where to save the PNG.
+        title_prefix:   Optional project name prefix.
+
+    Returns:
+        True on success, False otherwise.
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        return False
+
+    import json as _json
+    from pathlib import Path as _Path
+
+    monthly_dir = _Path(reports_dir) / "monthly"
+
+    phase_stats = []
+    for phase_name, start, end in monthly_phases:
+        pattern = f"pr_metrics_general_{start.replace('-', '')}_{end.replace('-', '')}.json"
+        json_file = monthly_dir / pattern
+        if not json_file.exists():
+            candidates = list(monthly_dir.glob(f"pr_metrics_general_{start.replace('-', '')}_*.json"))
+            json_file = candidates[0] if candidates else None
+
+        entry = {"name": phase_name, "ai": 0, "non_ai": 0, "throughput": 0.0,
+                 "review_time": 0.0, "comments": 0.0}
+        if json_file and json_file.exists():
+            try:
+                with open(json_file, "r") as fh:
+                    data = _json.load(fh)
+                stats = data.get("statistics", {})
+                overall = stats.get("non_ai_stats") or stats.get("ai_stats") or {}
+                entry = {
+                    "name": phase_name,
+                    "ai":          int(stats.get("ai_assisted_prs", 0) or 0),
+                    "non_ai":      int(stats.get("non_ai_prs", 0) or 0),
+                    "throughput":  float(stats.get("daily_throughput", 0) or 0),
+                    "review_time": float(overall.get("avg_time_to_first_review_hours", 0) or 0),
+                    "comments":    float(overall.get("avg_comments", 0) or 0),
+                }
+            except Exception:
+                pass
+        phase_stats.append(entry)
+
+    if not phase_stats:
+        return False
+
+    months = [d["name"] for d in phase_stats]
+    n = len(months)
+    x = list(range(n))
+    bar_w = 0.35
+
+    fig, axes = plt.subplots(2, 2, figsize=(max(10, n * 2.5), 8))
+    fig.suptitle(
+        f"{title_prefix}Monthly PR Metrics" if title_prefix else "Monthly PR Metrics",
+        fontsize=14, fontweight="bold", y=0.98,
+    )
+
+    def _bar_labels(ax):
+        for bar in ax.patches:
+            h = bar.get_height()
+            if h > 0:
+                ax.annotate(
+                    f"{h:.1f}",
+                    xy=(bar.get_x() + bar.get_width() / 2, h),
+                    xytext=(0, 3), textcoords="offset points",
+                    ha="center", va="bottom", fontsize=8,
+                )
+
+    def _style(ax, ylabel):
+        ax.set_xticks(x)
+        ax.set_xticklabels(months, fontsize=9)
+        ax.yaxis.grid(True, linestyle="--", alpha=0.4, zorder=0)
+        ax.set_axisbelow(True)
+        ax.set_ylabel(ylabel, fontsize=9)
+
+    # Panel 1 – AI-Assisted vs Non-AI PRs
+    ax1 = axes[0, 0]
+    ai_vals   = [d["ai"]     for d in phase_stats]
+    nai_vals  = [d["non_ai"] for d in phase_stats]
+    ax1.bar([i - bar_w / 2 for i in x], ai_vals,  width=bar_w, color="#7c3aed", label="AI-Assisted", zorder=3)
+    ax1.bar([i + bar_w / 2 for i in x], nai_vals, width=bar_w, color="#6b7280", label="Non-AI",      zorder=3)
+    ax1.set_title("AI-Assisted vs Non-AI PRs", fontsize=11)
+    ax1.legend(fontsize=8, framealpha=0.8)
+    _style(ax1, "PR Count")
+    _bar_labels(ax1)
+
+    # Panel 2 – Daily Throughput
+    ax2 = axes[0, 1]
+    tput = [d["throughput"] for d in phase_stats]
+    ax2.bar(x, tput, color="#3b82f6", zorder=3)
+    ax2.set_title("Daily Throughput", fontsize=11)
+    _style(ax2, "PRs / day")
+    _bar_labels(ax2)
+
+    # Panel 3 – Avg Time to First Review
+    ax3 = axes[1, 0]
+    rev = [d["review_time"] for d in phase_stats]
+    ax3.bar(x, rev, color="#f59e0b", zorder=3)
+    ax3.set_title("Avg Time to First Review", fontsize=11)
+    _style(ax3, "Hours")
+    _bar_labels(ax3)
+
+    # Panel 4 – Avg Comments per PR
+    ax4 = axes[1, 1]
+    cmts = [d["comments"] for d in phase_stats]
+    ax4.bar(x, cmts, color="#10b981", zorder=3)
+    ax4.set_title("Avg Comments per PR", fontsize=11)
+    _style(ax4, "Comments")
+    _bar_labels(ax4)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    plt.savefig(output_path, dpi=95, bbox_inches="tight")
+    plt.close()
+    print(f"Monthly metrics chart saved: {output_path}")
+    return True
+
+
 def collect_monthly_commit_stats(json_files: List[str]) -> List[Dict]:
     """
     Read a collection of pr_metrics_*.json files and aggregate commit stats by month.
