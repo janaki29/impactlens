@@ -1,0 +1,35 @@
+project:
+  jira_url: "https://redhat.atlassian.net"
+  jira_project_key: "Konflux UI"
+
+phases:
+  - name: "No AI Period"
+    start: "2025-01-01"
+    end: "2025-05-31"
+  - name: "Cursor Period"
+    start: "2025-06-01"
+    end: "2025-07-31"
+  - name: "Full AI Period"
+    start: "2025-08-01"
+    end: "2026-05-15"
+
+default_assignee: ""
+
+members:
+  - email: sbudhwar@redhat.com
+  - email: kkanova@redhat.com
+    capacity: 0.5
+  - email: djanaki@redhat.com
+  - email: abhindas@redhat.com
+    capacity: [1.0, 0.5, 0.0]
+  - email: rgalvao@redhat.com
+  - email: sjochman@redhat.com
+  - email: mtakac@redhat.com
+  - email: jpolonip@redhat.com
+  - email: mmarcin@redhat.com
+
+email_anonymous_id: false
+replace_existing_reports: true
+no_ai_analysis: true
+monthly_comparison: true
+comparison_reference_date: "2026-05-31"
